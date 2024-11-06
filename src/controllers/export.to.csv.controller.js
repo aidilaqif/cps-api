@@ -1,6 +1,6 @@
 const pool = require('../config/db.config');
 
-const exportController = {
+const exportToCSVController = {
     // Get all labels with filtering
     getAllLabels: async (req, res) => {
         const {startDate, endDate, labelTypes} = req.query;
@@ -8,19 +8,14 @@ const exportController = {
 
         try {
             let query = `
-                WITH base_label AS(
+                WITH base_labels AS(
                     SELECT
                         l.id,
                         l.check_in,
+                        l.label_type,
                         l.label_id,
-                        CASE
-                            WHEN l.label_type = 'fg_pallet' THEN fpl.raw_value
-                            ELSE NULL
-                        END as raw_value
-                        CASE
-                            WHEN l.label_type = 'fg_pallet' THEN fpl.work_order
-                            ELSE NULL
-                        END as work_order,
+                        fpl.raw_value,
+                        fpl.work_order,
                         CASE
                             WHEN l.label_type = 'fg_pallet' THEN fpl.plate_id
                             WHEN l.label_type = 'roll' THEN rl.roll_id
@@ -33,32 +28,25 @@ const exportController = {
                     LEFT JOIN fg_location_labels fl ON l.id = fl.label_id
                     LEFT JOIN paper_roll_location_labels prl ON l.id = prl.label_id
                     WHERE 1=1
+                    ${startDate ? ' AND l.check_in >= $1' : ''}
+                    ${endDate ? ` AND l.check_in <= $${startDate ? 2 : 1}` : ''}
+                    ${labelTypes ? ` AND l.label_type = ANY($${(startDate ? 1 : 0) + (endDate ? 1 : 0) + 1}::text[])` : ''}
+                )
+                SELECT * FROM base_labels
+                ORDER BY check_in DESC
             `;
 
             const params = [];
+            if(startDate) params.push(new Date(startDate));
+            if(endDate) params.push(new Date(endDate));
+            if(labelTypes) params.push(labelTypes.split(',').map(type => type.trim()));
 
-            // Add date filters if provided
-            if(startDate){
-                params.push(new Date(startDate));
-                query += ` AND l.check_in >= $${params.length}`;
-            }
+            console.log('Executing query:', query); // Debug log
+            console.log('Parameters:', params); // Debug log
 
-            if(endDate){
-                params.push(new Date(endDate));
-                query += ` AND l.check_in <= $${params.length}`;
-            }
+            const result = await pool.query(query);
 
-            // Add label type filter if provided
-            if(labelTypes){
-                const types = labelTypes.split(',').map(type => type.trim());
-                params.push(types);
-                query += ` AND l.label_type = ANY($${params.length}::text[])`;
-            }
-
-            query += ` ORDER BY l.check_in DESC)
-                SELECT * FROM base_labels`;
-
-            const result = await pool.query(query, params);
+            console.log('Query result:', result.rows.slice(0,2)); // Debug log first 2 rows
 
             // Transform data for response
             const transformedData = result.rows.map(row => ({
@@ -73,9 +61,11 @@ const exportController = {
                 data: transformedData
             });
         } catch (err) {
+            console.error('Full error:', err); // Debug log
             res.status(500).json({
                 message: 'Error retrieving labels for export',
-                error: err.message
+                error: err.message,
+                fullError: err.toString() // Additional error info
             });
         }
     },
@@ -120,7 +110,7 @@ const exportController = {
                             fl.location_id
                         FROM labels l
                         JOIN fg_location_labels fl ON l.id = fl.label_id
-                        WHERE l.label_type = 'fg_location
+                        WHERE l.label_type = 'fg_location'
                     `;
                     break;
 
@@ -174,14 +164,14 @@ function _getAdditionalInfo(row){
         case 'fg_pallet':
             return `Work Order: ${row.work_order}, Raw Value: ${row.raw_value}`;
         case 'roll':
-            return `Batch: ${row.batch_number}, Sequence: ${row.sequence_number}`;
+            return '';
         case 'fg_location':
-            return `Area Type: ${row.area_type}`;
+            return '';
         case 'paper_roll_location':
-            return `Row: ${row.row_number}, Position: ${row.position_number}`;
+            return '';
         default:
             return '';
     }
 }
 
-module.exports = exportController;
+module.exports = exportToCSVController;
