@@ -15,10 +15,10 @@ const fgPalletController = {
 
                 // First insert into labels table
                 const labelInsert = await client.query(
-                    `INSERT INTO labels (label_type, label_id, check_in)
-                    VALUES ($1, $2, $3)
+                    `INSERT INTO labels (label_type, label_id, check_in, status, status_updated_at)
+                    VALUES ($1, $2, $3, $4, $5)
                     RETURNING id`,
-                    ['fg_pallet', plateId, checkIn]
+                    ['fg_pallet', plateId, checkIn, 'Available', checkIn]
                 ); // Create parent label record
 
                 // Second insert into fg_pallet_labels table
@@ -38,7 +38,8 @@ const fgPalletController = {
                         plateId: palletInsert.rows[0].plate_id,
                         workOrder: palletInsert.rows[0].work_order,
                         rawValue: palletInsert.rows[0].raw_value,
-                        checkIn: palletInsert.rows[0].check_in
+                        checkIn: palletInsert.rows[0].check_in,
+                        status: 'Available'
                     }
                 });
             } catch (err) {
@@ -56,18 +57,16 @@ const fgPalletController = {
     },
     // Get all FG pallet with filtering options
     getAll: async (req, res) => {
-        const {startDate, endDate, plateId, workOrder} = req.query;
-        // Supports 4 filter parameters:
-        // - startDate: Filter by date range start
-        // - endDate: Filter by date range end
-        // - plateId: Filter by specific pallet
-        // - workOrder: Filter by work order number
+        const {startDate, endDate, plateId, workOrder, status} = req.query;
 
         try {
             let query = `
                 SELECT
                     l.check_in,
                     l.label_type,
+                    l.status,
+                    l.status_updated_at,
+                    l.status_notes,
                     fpl.raw_value,
                     fpl.plate_id,
                     fpl.work_order
@@ -122,6 +121,9 @@ const fgPalletController = {
                 `SELECT
                     l.check_in,
                     l.label_type,
+                    l.status,
+                    l.status_updated_at,
+                    l.status_notes,
                     fpl.raw_value,
                     fpl.plate_id,
                     fpl.work_order
@@ -144,6 +146,91 @@ const fgPalletController = {
         } catch (err) {
             res.status(500).json({
                 message: 'Error retrieving FG pallet label',
+                error: err.message
+            });
+        }
+    },
+    // Upadate FG Pallet Label Status
+    updateStatus: async (req, res) => {
+        const {id} = req.params;
+        const {status, notes} = req.body;
+
+        // Validate status
+        const validStatuses = ['Available', 'Checked out', 'Lost', 'Unresolved'];
+        if(!validStatuses.includes(status)){
+            return res.status(400).json({
+                message: 'Invalid status value'
+            });
+        }
+
+        try {
+            const client = await pool.connect();
+
+            try {
+                await client.query('BEGIN');
+
+                // First find the label_id
+                const findLabel = await client.query(
+                    `SELECT l.id, l.status as current_status
+                    FROM labels l
+                    JOIN fg_pallet_labels fpl on l.id = fpl.label_id
+                    WHERE fpl.plate_id = $1
+                    ORDER BY l.check_in DESC
+                    LIMIT 1`,
+                    [id]
+                );
+
+                if(findLabel.rows.length === 0){
+                    return res.status(400).json({
+                        message: 'FG pallet label not found'
+                    });
+                }
+
+                const labelId = findLabel.rows[0].id;
+                const currentStatus = findLabel.rows[0].current_status;
+
+                // Only update if status is different
+                if(currentStatus !== status){
+                    const updateResult = await client.query(
+                        `UPDATE labels
+                        SET status = $1,
+                            status_updated_at = CURRENT_TIMESTAMP,
+                            status_notes = $2
+                        WHERE id = $3
+                        RETURNING status, status_updated_at, status_notes`,
+                        [status, notes, labelId]
+                    );
+
+                    await client.query('COMMIT');
+
+                    res.json({
+                        message: 'Status updated successfully',
+                        data: {
+                            plateId: id,
+                            status: updateResult.rows[0].status,
+                            statusUpdatedAt: updateResult.rows[0].status_updated_at,
+                            notes: updateResult.rows[0].status_notes
+                        }
+                    });
+                } else {
+                    await client.query('ROLLBACK');
+                    res.json({
+                        message: 'No status change needed',
+                        data: {
+                            plateId: id,
+                            status: currentStatus
+                        }
+                    });
+                }
+            } catch (err) {
+                await client.query('ROLLBACK');
+                throw err;
+            } finally {
+                client.release();
+            }
+        } catch (err) {
+            res.status(500).json({
+                message: 'Error updating FG pallet status',
                 error: err.message
             });
         }

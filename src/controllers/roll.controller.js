@@ -15,10 +15,10 @@ const rollController = {
 
                 // Insert into labels table first
                 const labelInsert = await client.query(
-                    `INSERT INTO labels (label_type, label_id, check_in)
-                    VALUES ($1, $2, $3)
+                    `INSERT INTO labels (label_type, label_id, check_in, status, status_updated_at)
+                    VALUES ($1, $2, $3, $4, $5)
                     RETURNING id`,
-                    ['roll', rollId, checkIn]
+                    ['roll', rollId, checkIn, 'Available', checkIn]
                 );
 
                 // Insert into roll_labels table
@@ -35,7 +35,8 @@ const rollController = {
                     message: 'Roll label created successfully',
                     data: {
                         rollId: rollInsert.rows[0].roll_id,
-                        checkIn: rollInsert.rows[0].check_in
+                        checkIn: rollInsert.rows[0].check_in,
+                        status: 'Available'
                     }
                 });
             } catch (err) {
@@ -58,6 +59,9 @@ const rollController = {
                 SELECT
                     l.check_in,
                     l.label_type,
+                    l.status,
+                    l.status_updated_at,
+                    l.status_notes,
                     rl.roll_id
                 FROM labels l
                 JOIN roll_labels rl ON l.id = rl.label_id
@@ -97,7 +101,13 @@ const rollController = {
 
         try {
             const query = `
-                SELECT l.check_in, l.label_type, rl.roll_id
+                SELECT
+                    l.check_in,
+                    l.label_type,
+                    l.status,
+                    l.status_updated_at,
+                    l.status_notes,
+                    rl.roll_id
                 FROM labels l
                 JOIN roll_labels rl ON l.id = rl.label_id
                 WHERE rl.roll_id = $1
@@ -118,6 +128,92 @@ const rollController = {
             console.error('Error in getById', err);
             res.status(500).json({
                 message: 'Error retrieving roll label',
+                error: err.message
+            });
+        }
+    },
+    // Update Roll Label
+    updateStatus: async (req, res) => {
+        const {id} = req.params;
+        const {status, notes} = req.body;
+
+        // Validate status
+        const validStatuses = ['Available', 'Checked out', 'Lost', 'Unresolved'];
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({
+                message: 'Invalid status value'
+            });
+        }
+
+        try {
+            const client = await pool.connect();
+
+            try {
+                await client.query('BEGIN');
+
+                // First find the label_id
+                const findLabel = await client.query(
+                    `SELECT l.id, l.status as current_status
+                     FROM labels l
+                     JOIN roll_labels rl ON l.id = rl.label_id
+                     WHERE rl.roll_id = $1
+                     ORDER BY l.check_in DESC
+                     LIMIT 1`,
+                    [id]
+                );
+
+                if (findLabel.rows.length === 0) {
+                    return res.status(404).json({
+                        message: 'Roll label not found'
+                    });
+                }
+
+                const labelId = findLabel.rows[0].id;
+                const currentStatus = findLabel.rows[0].current_status;
+
+                // Only update if status is different
+                if (currentStatus !== status) {
+                    const updateResult = await client.query(
+                        `UPDATE labels 
+                         SET status = $1,
+                             status_updated_at = CURRENT_TIMESTAMP,
+                             status_notes = $2
+                         WHERE id = $3
+                         RETURNING status, status_updated_at, status_notes`,
+                        [status, notes, labelId]
+                    );
+
+                    await client.query('COMMIT');
+
+                    res.json({
+                        message: 'Status updated successfully',
+                        data: {
+                            rollId: id,
+                            status: updateResult.rows[0].status,
+                            statusUpdatedAt: updateResult.rows[0].status_updated_at,
+                            notes: updateResult.rows[0].status_notes
+                        }
+                    });
+                } else {
+                    await client.query('ROLLBACK');
+                    res.json({
+                        message: 'No status change needed',
+                        data: {
+                            rollId: id,
+                            status: currentStatus
+                        }
+                    });
+                }
+            } catch (err) {
+                await client.query('ROLLBACK');
+                throw err;
+            } finally {
+                client.release();
+            }
+        } catch (err) {
+            console.error('Error in updateStatus:', err);
+            res.status(500).json({
+                message: 'Error updating roll status',
                 error: err.message
             });
         }
