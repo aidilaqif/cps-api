@@ -6,6 +6,7 @@ const fgLocationController = require('../controllers/fg.location.controller');
 const fgPalletController = require('../controllers/fg.pallet.controller');
 const paperRollLocationController = require('../controllers/paper.roll.location.controller');
 const rollController = require('../controllers/roll.controller');
+const exportToCSVController = require('../controllers/export.to.csv.controller');
 
 // Fg Location Label routes
 router.post('/fg-location', fgLocationController.create);
@@ -30,5 +31,9 @@ router.post('/roll', rollController.create);
 router.get('/roll', rollController.getAll);
 router.get('/roll/:id', rollController.getById);
 router.delete('/roll/:id', rollController.delete);
+
+// Export to CSV Routes
+router.get('/exportToCSV/labels', exportToCSVController.getAllLabels);
+router.get('/exportToCSV/labels/:type', exportToCSVController.getLabelsByType);
 
 module.exports = router;
