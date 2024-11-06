@@ -41,12 +41,7 @@ const exportToCSVController = {
             if(endDate) params.push(new Date(endDate));
             if(labelTypes) params.push(labelTypes.split(',').map(type => type.trim()));
 
-            console.log('Executing query:', query); // Debug log
-            console.log('Parameters:', params); // Debug log
-
             const result = await pool.query(query);
-
-            console.log('Query result:', result.rows.slice(0,2)); // Debug log first 2 rows
 
             // Transform data for response
             const transformedData = result.rows.map(row => ({
@@ -61,11 +56,9 @@ const exportToCSVController = {
                 data: transformedData
             });
         } catch (err) {
-            console.error('Full error:', err); // Debug log
             res.status(500).json({
                 message: 'Error retrieving labels for export',
                 error: err.message,
-                fullError: err.toString() // Additional error info
             });
         }
     },
