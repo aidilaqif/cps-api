@@ -1,18 +1,34 @@
-const {Pool} = require('pg'); // Maintains db connections
+const { Pool } = require('pg');
+const path = require('path');
+const dotenv = require('dotenv');
 
-require('dotenv').config(); // Loads environment variables from .env file
+// Load .env from project root
+dotenv.config({ path: path.join(__dirname, '../../.env') });
 
-const dbConfig = {
-    host: process.env.DB_HOST, // Database host address
-    port: parseInt(process.env.DB_PORT), // Database port number
-    database: process.env.DB_NAME, // Database name
-    user: process.env.DB_USERNAME, // Database user credentials
-    password: process.env.DB_PASSWORD, // Database password
+const pool = new Pool({
+    host: process.env.DB_HOST,
+    port: parseInt(process.env.DB_PORT || '5432'),
+    database: process.env.DB_NAME,
+    user: process.env.DB_USERNAME,
+    password: process.env.DB_PASSWORD,
     ssl: {
-        rejectUnauthoried: false // Allow self-signed certificates
+        rejectUnauthorized: false
     }
-};
+});
 
-const pool = new Pool(dbConfig); // Creates new connection pool
+// Test connection
+pool.query('SELECT NOW()', (err, res) => {
+    if (err) {
+        console.error('Database connection test failed:', err.message);
+        console.log('Connection details:', {
+            host: process.env.DB_HOST,
+            port: process.env.DB_PORT,
+            database: process.env.DB_NAME,
+            user: process.env.DB_USERNAME,
+        });
+    } else {
+        console.log('Database connected successfully at:', res.rows[0].now);
+    }
+});
 
-module.exports = pool; // Exports pool instance to be used in other files
+module.exports = pool;
