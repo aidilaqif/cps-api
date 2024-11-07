@@ -11,6 +11,12 @@ const exportToCSVController = require('../controllers/export.to.csv.controller')
 // Fg Location Label routes
 router.post('/fg-location', fgLocationController.create);
 router.get('/fg-location', fgLocationController.getAll); // Get all FG location labels
+router.get('/fg-location/latest', async (req, res) => {
+    await fgLocationController.getLatest(req, res);
+});
+router.get('/fg-location/latest-stats', async (req, res) => {
+    await fgLocationController.getLatestStats(req, res);
+});
 router.get('/fg-location/:id', fgLocationController.getById);
 router.put('/fg-location/:id/status', async (req, res) => {
     await fgLocationController.updateStatus(req, res);

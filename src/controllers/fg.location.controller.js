@@ -97,6 +97,102 @@ const fgLocationController = {
             });
         }
     },
+    // Get Latest FG Location Label
+    getLatest: async (req, res) => {
+        try {
+            const query = `
+                SELECT 
+                    l.check_in,
+                    l.label_type,
+                    l.status,
+                    l.status_updated_at,
+                    l.status_notes,
+                    fl.location_id
+                FROM labels l
+                JOIN fg_location_labels fl ON l.id = fl.label_id
+                WHERE l.label_type = 'fg_location'
+                ORDER BY l.check_in DESC
+            `;
+
+            const result = await pool.query(query);
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({
+                    message: 'No FG location labels found'
+                });
+            }
+
+            res.json({
+                count: result.rows.length,
+                data: result.rows.map(row => ({
+                    locationId: row.location_id,
+                    checkIn: row.check_in,
+                    labelType: row.label_type,
+                    status: row.status,
+                    statusUpdatedAt: row.status_updated_at,
+                    statusNotes: row.status_notes
+                }))
+            });
+        } catch (err) {
+            console.error('Error in getLatest:', err);
+            res.status(500).json({
+                message: 'Error retrieving latest FG location labels',
+                error: err.message
+            });
+        }
+    },
+
+    // Get Latest FG Location Label Stats
+    getLatestStats: async (req, res) => {
+        try {
+            const query = `
+                SELECT
+                    COUNT(DISTINCT fl.location_id) as total_locations,
+                    COUNT(DISTINCT CASE WHEN l.status = 'Available' THEN fl.location_id END) as available_locations,
+                    COUNT(DISTINCT CASE WHEN l.status = 'Checked out' THEN fl.location_id END) as checked_out_locations,
+                    COUNT(DISTINCT CASE WHEN l.status = 'Lost' THEN fl.location_id END) as lost_locations,
+                    COUNT(DISTINCT CASE WHEN l.status = 'Unresolved' THEN fl.location_id END) as unresolved_locations,
+                    MAX(l.check_in) as latest_scan_time,
+                    MIN(l.check_in) as oldest_scan_time,
+                    COUNT(DISTINCT CASE 
+                        WHEN LENGTH(fl.location_id) = 1 THEN fl.location_id 
+                    END) as main_areas,
+                    COUNT(DISTINCT CASE 
+                        WHEN LENGTH(fl.location_id) = 3 AND fl.location_id NOT LIKE 'R%' THEN fl.location_id 
+                    END) as sub_areas,
+                    COUNT(DISTINCT CASE 
+                        WHEN fl.location_id LIKE 'R%' THEN fl.location_id 
+                    END) as restricted_areas
+                FROM labels l
+                JOIN fg_location_labels fl ON l.id = fl.label_id
+                WHERE l.label_type = 'fg_location'
+            `;
+
+            const result = await pool.query(query);
+
+            const stats = result.rows[0];
+            res.json({
+                data: {
+                    totalLocations: parseInt(stats.total_locations),
+                    availableLocations: parseInt(stats.available_locations),
+                    checkedOutLocations: parseInt(stats.checked_out_locations),
+                    lostLocations: parseInt(stats.lost_locations),
+                    unresolvedLocations: parseInt(stats.unresolved_locations),
+                    mainAreas: parseInt(stats.main_areas),
+                    subAreas: parseInt(stats.sub_areas),
+                    restrictedAreas: parseInt(stats.restricted_areas),
+                    latestScanTime: stats.latest_scan_time,
+                    oldestScanTime: stats.oldest_scan_time
+                }
+            });
+        } catch (err) {
+            console.error('Error in getLatestStats:', err);
+            res.status(500).json({
+                message: 'Error retrieving FG location statistics',
+                error: err.message
+            });
+        }
+    },
     // Get FG Location label by ID
     getById: async (req, res) => {
         const {id} = req.params; // Gets ID from URL parameters
