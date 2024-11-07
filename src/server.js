@@ -1,23 +1,37 @@
-const express = require('express'); // Import Express.js framewaork - main web app framework
-const cors = require('cors'); // Allow API to be accessed from different domains/origins
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+const dotenv = require('dotenv');
 
-require('dotenv').config(); // Load environment variables from .env file
+// Load .env from project root
+dotenv.config({ path: path.join(__dirname, '../.env') });
 
-const app = express(); // Creates new Express app instance
-
-const port = process.env.PORT || 3000; // Sets the port for server to run
+const app = express();
+const port = process.env.PORT || 3000;
 
 // Middlewares
-app.use(cors()); // Enables CORS for all routes
-app.use(express.json()); // Parse incoming JSON payloads in request bodies
+app.use(cors());
+app.use(express.json());
 
 // Import routes
 const labelRoutes = require('./routes/label.routes');
 
 // Use routes
-app.use('/cps-api', labelRoutes); // Mounts the label routes under the '/api' path prefix
+app.use('/cps-api', labelRoutes);
 
-// Simple error handler
+// Test route
+app.get('/cps-api/test', (req, res) => {
+    res.json({
+        message: 'API is working!',
+        timestamp: new Date().toISOString(),
+        environment: {
+            nodeEnv: process.env.NODE_ENV || 'development',
+            port: port
+        }
+    });
+});
+
+// Error handler
 app.use((err, req, res, next) => {
     res.status(500).json({
         message: err.message || 'Internal Server Error'
@@ -25,6 +39,7 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
-app.listen(port, () => {
+app.listen(port, '0.0.0.0', () => {
     console.log(`Server is running on port ${port}`);
+    console.log(`Test endpoint: http://localhost:${port}/cps-api/test`);
 });
