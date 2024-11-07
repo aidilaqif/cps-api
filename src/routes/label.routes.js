@@ -20,6 +20,12 @@ router.delete('/fg-location/:id', fgLocationController.delete);
 // Fg Pallet Label Routes
 router.post('/fg-pallet', fgPalletController.create);
 router.get('/fg-pallet', fgPalletController.getAll);
+router.get('/fg-pallet/latest', async (req, res) => {
+    await fgPalletController.getLatest(req, res);
+});
+router.get('/fg-pallet/latest-stats', async (req, res) => {
+    await fgPalletController.getLatestStats(req, res);
+});
 router.get('/fg-pallet/:id', fgPalletController.getById);
 router.put('/fg-pallet/:id/status', async (req, res) => {
     await fgPalletController.updateStatus(req, res);

@@ -112,6 +112,93 @@ const fgPalletController = {
             });
         }
     },
+    // Get Latest FG Pallet Label
+    getLatest: async (req, res) => {
+        try {
+            const query = `
+                SELECT 
+                    l.check_in,
+                    l.label_type,
+                    l.status,
+                    l.status_updated_at,
+                    l.status_notes,
+                    fpl.raw_value,
+                    fpl.plate_id,
+                    fpl.work_order
+                FROM labels l
+                JOIN fg_pallet_labels fpl ON l.id = fpl.label_id
+                WHERE l.label_type = 'fg_pallet'
+                ORDER BY l.check_in DESC
+            `;
+
+            const result = await pool.query(query);
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({
+                    message: 'No FG pallet labels found'
+                });
+            }
+
+            res.json({
+                count: result.rows.length,
+                data: result.rows.map(row => ({
+                    rawValue: row.raw_value,
+                    plateId: row.plate_id,
+                    workOrder: row.work_order,
+                    checkIn: row.check_in,
+                    labelType: row.label_type,
+                    status: row.status,
+                    statusUpdatedAt: row.status_updated_at,
+                    statusNotes: row.status_notes
+                }))
+            });
+        } catch (err) {
+            console.error('Error in getLatest:', err);
+            res.status(500).json({
+                message: 'Error retrieving latest FG pallet labels',
+                error: err.message
+            });
+        }
+    },
+    // Get Latest FG Pallet Labels Stats
+    getLatestStats: async (req, res) => {
+        try {
+            const query = `
+                SELECT
+                    COUNT(DISTINCT fpl.plate_id) as total_pallets,
+                    COUNT(DISTINCT CASE WHEN l.status = 'Available' THEN fpl.plate_id END) as available_pallets,
+                    COUNT(DISTINCT CASE WHEN l.status = 'Checked out' THEN fpl.plate_id END) as checked_out_pallets,
+                    COUNT(DISTINCT CASE WHEN l.status = 'Lost' THEN fpl.plate_id END) as lost_pallets,
+                    COUNT(DISTINCT CASE WHEN l.status = 'Unresolved' THEN fpl.plate_id END) as unresolved_pallets,
+                    MAX(l.check_in) as latest_scan_time,
+                    MIN(l.check_in) as oldest_scan_time
+                FROM labels l
+                JOIN fg_pallet_labels fpl ON l.id = fpl.label_id
+                WHERE l.label_type = 'fg_pallet'
+            `;
+
+            const result = await pool.query(query);
+
+            const stats = result.rows[0];
+            res.json({
+                data: {
+                    totalPallets: parseInt(stats.total_pallets),
+                    availablePallets: parseInt(stats.available_pallets),
+                    checkedOutPallets: parseInt(stats.checked_out_pallets),
+                    lostPallets: parseInt(stats.lost_pallets),
+                    unresolvedPallets: parseInt(stats.unresolved_pallets),
+                    latestScanTime: stats.latest_scan_time,
+                    oldestScanTime: stats.oldest_scan_time
+                }
+            });
+        } catch (err) {
+            console.error('Error in getLatestStats:', err);
+            res.status(500).json({
+                message: 'Error retrieving FG pallet statistics',
+                error: err.message
+            });
+        }
+    },
     // Get specific pallet label by ID
     getById: async (req, res) => {
         const {id} = req.params;
