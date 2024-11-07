@@ -44,6 +44,12 @@ router.delete('/paper-roll-location/:id', paperRollLocationController.delete);
 // Roll Label Routes
 router.post('/roll', rollController.create);
 router.get('/roll', rollController.getAll);
+router.get('/roll/latest', async (req, res) => {
+    await rollController.getLatest(req, res);
+});
+router.get('/roll/latest-stats', async (req, res) => {
+    await rollController.getLatestStats(req, res);
+});
 router.get('/roll/:id', rollController.getById);
 router.put('/roll/:id/status', async (req, res) => {
     await rollController.updateStatus(req, res);

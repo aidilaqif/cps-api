@@ -95,6 +95,90 @@ const rollController = {
             });
         }
     },
+    // Get Latest Roll Label
+    getLatest: async (req, res) => {
+        try {
+            const query = `
+                SELECT 
+                    l.check_in,
+                    l.label_type,
+                    l.status,
+                    l.status_updated_at,
+                    l.status_notes,
+                    rl.roll_id
+                FROM labels l
+                JOIN roll_labels rl ON l.id = rl.label_id
+                WHERE l.label_type = 'roll'
+                ORDER BY l.check_in DESC
+            `;
+
+            const result = await pool.query(query);
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({
+                    message: 'No roll labels found'
+                });
+            }
+
+            res.json({
+                count: result.rows.length,
+                data: result.rows.map(row => ({
+                    rollId: row.roll_id,
+                    checkIn: row.check_in,
+                    labelType: row.label_type,
+                    status: row.status,
+                    statusUpdatedAt: row.status_updated_at,
+                    statusNotes: row.status_notes
+                }))
+            });
+        } catch (err) {
+            console.error('Error in getLatest:', err);
+            res.status(500).json({
+                message: 'Error retrieving latest roll labels',
+                error: err.message
+            });
+        }
+    },
+
+    // Get Roll Label Latest Stats
+    getLatestStats: async (req, res) => {
+        try {
+            const query = `
+                SELECT
+                    COUNT(DISTINCT rl.roll_id) as total_rolls,
+                    COUNT(DISTINCT CASE WHEN l.status = 'Available' THEN rl.roll_id END) as available_rolls,
+                    COUNT(DISTINCT CASE WHEN l.status = 'Checked out' THEN rl.roll_id END) as checked_out_rolls,
+                    COUNT(DISTINCT CASE WHEN l.status = 'Lost' THEN rl.roll_id END) as lost_rolls,
+                    COUNT(DISTINCT CASE WHEN l.status = 'Unresolved' THEN rl.roll_id END) as unresolved_rolls,
+                    MAX(l.check_in) as latest_scan_time,
+                    MIN(l.check_in) as oldest_scan_time
+                FROM labels l
+                JOIN roll_labels rl ON l.id = rl.label_id
+                WHERE l.label_type = 'roll'
+            `;
+
+            const result = await pool.query(query);
+            
+            const stats = result.rows[0];
+            res.json({
+                data: {
+                    totalRolls: parseInt(stats.total_rolls),
+                    availableRolls: parseInt(stats.available_rolls),
+                    checkedOutRolls: parseInt(stats.checked_out_rolls),
+                    lostRolls: parseInt(stats.lost_rolls),
+                    unresolvedRolls: parseInt(stats.unresolved_rolls),
+                    latestScanTime: stats.latest_scan_time,
+                    oldestScanTime: stats.oldest_scan_time
+                }
+            });
+        } catch (err) {
+            console.error('Error in getLatestStats:', err);
+            res.status(500).json({
+                message: 'Error retrieving roll statistics',
+                error: err.message
+            });
+        }
+    },
     // Get roll label by ID
     getById: async (req, res) => {
         const {id} = req.params;
