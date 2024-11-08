@@ -13,11 +13,20 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
   ssl: {
     rejectUnauthorized: false
-  }
+  },
+  // Add timezone configuration
+  timezone: 'Asia/Kuala_Lumpur',
+  // Set session parameters
+  connectionTimeZone: 'Asia/Kuala_Lumpur',
 });
 
 // Test database connection
-pool.on('connect', () => {
+pool.on('connect', (client) => {
+  client.query('SET timezone="Asia/Kuala_Lumpur";', (err) => {
+    if (err) {
+      console.error('Error setting timezone:', err);
+    }
+  });
   console.log('Successfully connected to PostgreSQL database');
 });
 

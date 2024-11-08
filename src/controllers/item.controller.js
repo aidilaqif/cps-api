@@ -1,4 +1,5 @@
 const pool = require('../config/db.config');
+const moment = require('moment-timezone');
 
 exports.getAllItems = async (req, res) => {
   const { type, status, location } = req.query;
@@ -80,37 +81,30 @@ exports.checkItemExists = async (req, res) => {
 
 // Create new item
 exports.createNewItem = async (req, res) => {
-  const { label_id, label_type, details } = req.body;
-  
-  console.log('Received create item request:', { label_id, label_type, details }); // Debug log
-
+  const { label_id, label_type, location_id, details } = req.body;
   const client = await pool.connect();
-  
+
   try {
-    // Validate input
-    if (!label_id || !label_type) {
-      throw new Error('Missing required fields: label_id and label_type are required');
-    }
-
-    // Validate details based on type
-    if (label_type === 'FG Pallet') {
-      if (!details.plt_number || !details.quantity || !details.total_pieces) {
-        throw new Error('Missing required FG Pallet details: plt_number, quantity, and total_pieces are required');
-      }
-    }
-
     await client.query('BEGIN');
 
-    // Insert into labels table
-    console.log('Inserting into labels table...'); // Debug log
+    // Get CURRENT Malaysia time (not future date)
+    const malaysiaTime = moment().tz('Asia/Kuala_Lumpur').toISOString();
+    console.log('Current Malaysia time:', malaysiaTime); // Debug log
+
     const labelResult = await client.query(
-      'INSERT INTO labels (label_id, label_type, status) VALUES ($1, $2, $3) RETURNING *',
-      [label_id, label_type, 'Unresolved']
+      `INSERT INTO labels (
+        label_id, 
+        label_type, 
+        location_id, 
+        status, 
+        last_scan_time
+      ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kuala_Lumpur') 
+      RETURNING *`,
+      [label_id, label_type, location_id, 'Unresolved']
     );
 
     let detailsResult;
     if (label_type === 'FG Pallet') {
-      console.log('Inserting FG Pallet details...'); // Debug log
       detailsResult = await client.query(
         'INSERT INTO fg_pallets (label_id, plt_number, quantity, work_order_id, total_pieces) VALUES ($1, $2, $3, $4, $5) RETURNING *',
         [
@@ -121,25 +115,41 @@ exports.createNewItem = async (req, res) => {
           details.total_pieces
         ]
       );
+    } else if (label_type === 'Roll') {
+      detailsResult = await client.query(
+        'INSERT INTO paper_rolls (label_id, code, name, size_mm) VALUES ($1, $2, $3, $4) RETURNING *',
+        [
+          label_id,
+          details.code,
+          details.name,
+          details.size_mm
+        ]
+      );
     }
 
     await client.query('COMMIT');
-    console.log('Transaction committed successfully'); // Debug log
+    console.log('Transaction committed successfully');
+
+    // Format the timestamp before sending response
+    const formattedResult = {
+      ...labelResult.rows[0],
+      last_scan_time: moment(labelResult.rows[0].last_scan_time)
+        .tz('Asia/Kuala_Lumpur')
+        .format(),
+      details: detailsResult?.rows[0]
+    };
 
     res.status(201).json({
       message: 'Item created successfully',
-      data: {
-        ...labelResult.rows[0],
-        details: detailsResult?.rows[0]
-      }
+      data: formattedResult
     });
+
   } catch (err) {
-    console.error('Error creating item:', err); // Debug log
     await client.query('ROLLBACK');
+    console.error('Error in createNewItem:', err);
     res.status(500).json({
       message: 'Error creating item',
-      error: err.message,
-      details: err.stack // Include stack trace for debugging
+      error: err.message
     });
   } finally {
     client.release();
@@ -149,24 +159,14 @@ exports.createNewItem = async (req, res) => {
 exports.updateStatus = async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
-  
-  // Validate status
-  const validStatuses = ['Available', 'Checked Out', 'Lost', 'Unresolved'];
-  if (!validStatuses.includes(status)) {
-    return res.status(400).json({
-      message: 'Invalid status. Must be one of: ' + validStatuses.join(', ')
-    });
-  }
 
   try {
-    console.log('Updating status for item:', id, 'to:', status);
-    
     const result = await pool.query(
       `UPDATE labels 
        SET status = $1,
-           last_scan_time = CURRENT_TIMESTAMP
+           last_scan_time = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kuala_Lumpur'
        WHERE label_id = $2
-       RETURNING label_id, label_type, location_id, status, last_scan_time`,
+       RETURNING *`,
       [status, id]
     );
 
@@ -176,10 +176,19 @@ exports.updateStatus = async (req, res) => {
       });
     }
 
+    // Format the timestamp before sending response
+    const formattedResult = {
+      ...result.rows[0],
+      last_scan_time: moment(result.rows[0].last_scan_time)
+        .tz('Asia/Kuala_Lumpur')
+        .format()
+    };
+
     res.json({
       message: 'Status updated successfully',
-      data: result.rows[0]
+      data: formattedResult
     });
+
   } catch (err) {
     console.error('Error updating status:', err);
     res.status(500).json({
@@ -194,26 +203,12 @@ exports.updateLocation = async (req, res) => {
   const { location_id } = req.body;
 
   try {
-    console.log('Updating location for item:', id, 'to:', location_id);
-    
-    // First verify the location exists
-    const locationCheck = await pool.query(
-      'SELECT location_id FROM location_types WHERE location_id = $1',
-      [location_id]
-    );
-
-    if (locationCheck.rows.length === 0) {
-      return res.status(404).json({
-        message: `Location ${location_id} not found`
-      });
-    }
-
     const result = await pool.query(
       `UPDATE labels 
        SET location_id = $1,
-           last_scan_time = CURRENT_TIMESTAMP
+           last_scan_time = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kuala_Lumpur'
        WHERE label_id = $2
-       RETURNING label_id, label_type, location_id, status, last_scan_time`,
+       RETURNING *`,
       [location_id, id]
     );
 
@@ -223,10 +218,19 @@ exports.updateLocation = async (req, res) => {
       });
     }
 
+    // Format the timestamp before sending response
+    const formattedResult = {
+      ...result.rows[0],
+      last_scan_time: moment(result.rows[0].last_scan_time)
+        .tz('Asia/Kuala_Lumpur')
+        .format()
+    };
+
     res.json({
       message: 'Location updated successfully',
-      data: result.rows[0]
+      data: formattedResult
     });
+
   } catch (err) {
     console.error('Error updating location:', err);
     res.status(500).json({
