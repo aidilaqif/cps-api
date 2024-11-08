@@ -1,3 +1,5 @@
+// server.js
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -19,6 +21,9 @@ app.use(express.json());
 // Import routes
 const apiRoutes = require('./routes/api.routes');
 
+// API routes - Make sure the base path matches your client configuration
+app.use('/api', apiRoutes);
+
 // Health check endpoint
 app.get('/health', async (req, res) => {
   try {
@@ -27,12 +32,7 @@ app.get('/health', async (req, res) => {
       status: 'healthy',
       timestamp: new Date().toISOString(),
       database: 'connected',
-      postgresTime: dbCheck.rows[0].now,
-      config: {
-        host: process.env.DB_HOST,
-        database: process.env.DB_NAME,
-        user: process.env.DB_USER
-      }
+      postgresTime: dbCheck.rows[0].now
     });
   } catch (err) {
     console.error('Database connection error:', err);
@@ -40,18 +40,10 @@ app.get('/health', async (req, res) => {
       status: 'unhealthy',
       timestamp: new Date().toISOString(),
       database: 'disconnected',
-      error: err.message,
-      config: {
-        host: process.env.DB_HOST,
-        database: process.env.DB_NAME,
-        user: process.env.DB_USER
-      }
+      error: err.message
     });
   }
 });
-
-// API routes
-app.use('/api', apiRoutes);
 
 // Start server
 const PORT = process.env.PORT || 3000;
