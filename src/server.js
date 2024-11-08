@@ -3,43 +3,58 @@ const cors = require('cors');
 const path = require('path');
 const dotenv = require('dotenv');
 
-// Load .env from project root
+// Load environment variables from the root directory
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
-const app = express();
-const port = process.env.PORT || 3000;
+// Import after environment variables are loaded
+const pool = require('./config/db.config');
 
-// Middlewares
+// Initialize express app
+const app = express();
+
+// Middleware
 app.use(cors());
 app.use(express.json());
 
 // Import routes
-const labelRoutes = require('./routes/label.routes');
+const apiRoutes = require('./routes/api.routes');
 
-// Use routes
-app.use('/cps-api', labelRoutes);
-
-// Test route
-app.get('/cps-api/test', (req, res) => {
+// Health check endpoint
+app.get('/health', async (req, res) => {
+  try {
+    const dbCheck = await pool.query('SELECT NOW()');
     res.json({
-        message: 'API is working!',
-        timestamp: new Date().toISOString(),
-        environment: {
-            nodeEnv: process.env.NODE_ENV || 'development',
-            port: port
-        }
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      database: 'connected',
+      postgresTime: dbCheck.rows[0].now,
+      config: {
+        host: process.env.DB_HOST,
+        database: process.env.DB_NAME,
+        user: process.env.DB_USER
+      }
     });
+  } catch (err) {
+    console.error('Database connection error:', err);
+    res.status(503).json({
+      status: 'unhealthy',
+      timestamp: new Date().toISOString(),
+      database: 'disconnected',
+      error: err.message,
+      config: {
+        host: process.env.DB_HOST,
+        database: process.env.DB_NAME,
+        user: process.env.DB_USER
+      }
+    });
+  }
 });
 
-// Error handler
-app.use((err, req, res, next) => {
-    res.status(500).json({
-        message: err.message || 'Internal Server Error'
-    });
-});
+// API routes
+app.use('/api', apiRoutes);
 
 // Start server
-app.listen(port, '0.0.0.0', () => {
-    console.log(`Server is running on port ${port}`);
-    console.log(`Test endpoint: http://localhost:${port}/cps-api/test`);
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });
