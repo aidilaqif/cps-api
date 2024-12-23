@@ -14,7 +14,8 @@
     "helmet": "^8.0.0",
     "moment-timezone": "^0.5.46",
     "morgan": "^1.10.0",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "nodemon": "^3.1.7"
