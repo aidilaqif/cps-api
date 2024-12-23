@@ -35,3 +35,12 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
+
+node_modules/
+.env
+npm-debug.log
+.DS_Store
+src/test/fg-location-test.txt
+src/test/fg-pallet-test.txt
+src/test/paper-roll-test.txt
+src/test/roll-test.txt
