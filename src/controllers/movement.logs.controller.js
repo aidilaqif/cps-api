@@ -259,3 +259,82 @@ exports.deleteFlightSession = async (req, res) => {
     client.release();
   }
 };
+
+exports.getDroneCoverageStats = async (req, res) => {
+  try {
+    const { session_id } = req.query; // Pass `session_id` as a query parameter
+    const result = await pool.query(`
+      SELECT 
+        COUNT(*) AS total_scans, 
+        COUNT(DISTINCT labels.location_id) AS unique_locations
+      FROM movement_logs
+      JOIN labels ON movement_logs.label_id = labels.label_id
+      WHERE movement_logs.session_id = $1
+    `, [session_id]);
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("Error fetching drone coverage stats:", err);
+    res.status(500).json({ message: "Failed to fetch drone coverage stats" });
+  }
+};
+
+exports.getStockTakeStats = async (req, res) => {
+  try {
+    const { session_id } = req.query; // Pass `session_id` as a query parameter
+    const result = await pool.query(`
+      SELECT 
+        labels.location_id, 
+        COUNT(movement_logs.label_id) AS items_scanned
+      FROM movement_logs
+      JOIN labels ON movement_logs.label_id = labels.label_id
+      WHERE movement_logs.session_id = $1
+      GROUP BY labels.location_id
+      ORDER BY items_scanned DESC
+    `, [session_id]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error fetching stock take stats:", err);
+    res.status(500).json({ message: "Failed to fetch stock take stats" });
+  }
+};
+
+exports.getRelocationStats = async (req, res) => {
+  try {
+    const { session_id } = req.query; // Pass `session_id` as a query parameter
+    const result = await pool.query(`
+      SELECT 
+        labels.location_id, 
+        COUNT(*) AS relocations
+      FROM movement_logs
+      JOIN labels ON movement_logs.label_id = labels.label_id
+      WHERE movement_logs.session_id = $1 AND movement_logs.action = 'relocate'
+      GROUP BY labels.location_id
+      ORDER BY relocations DESC
+    `, [session_id]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error fetching relocation stats:", err);
+    res.status(500).json({ message: "Failed to fetch relocation stats" });
+  }
+};
+
+exports.getMovementHistory = async (req, res) => {
+  try {
+    const { session_id } = req.query; // Pass `session_id` as a query parameter
+    const result = await pool.query(`
+      SELECT 
+        movement_logs.action, 
+        labels.location_id, 
+        movement_logs.timestamp 
+      FROM movement_logs
+      JOIN labels ON movement_logs.label_id = labels.label_id
+      WHERE movement_logs.session_id = $1
+      ORDER BY movement_logs.timestamp DESC
+      LIMIT 50
+    `, [session_id]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error fetching movement history:", err);
+    res.status(500).json({ message: "Failed to fetch movement history" });
+  }
+};
