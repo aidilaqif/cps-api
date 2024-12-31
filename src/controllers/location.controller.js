@@ -60,6 +60,68 @@ exports.createLocation = async (req, res) => {
   }
 };
 
+// Delete Location
+exports.deleteLocation = async (req, res) => {
+  const { id } = req.params;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Check if location exists
+    const locationCheck = await client.query(
+      'SELECT * FROM location_types WHERE location_id = $1',
+      [id]
+    );
+
+    if(locationCheck.rows.length === 0){
+      return res.status(404).json({
+        message: 'Location not found'
+      });
+    }
+
+    // Check if any items is in the location in any table
+    const itemCheck = await Promise.all([
+      // Check labels table
+      client.query('SELECT label_id FROM labels WHERE location_id = $1 LIMIT 1', [id]),
+      // Check paper rolls table
+      client.query('SELECT label_id FROM paper_rolls WHERE location_id = $1 LIMIT 1', [id]),
+      // Check fg pallets table
+      client.query('SELECT label_id FROM fg_pallets WHERE location_id = $1 LIMIT 1', [id])
+    ]);
+
+    // If any query returns rows, items are still in the location
+    const hasAssignedItems = itemCheck.some(result => result.rows.length > 0);
+
+    if(hasAssignedItems){
+      return res.status(400).json({
+        message: 'Cannot delete locations: Items are still assigned to this location'
+      });
+    }
+
+    // If no items in the location
+    await client.query(
+      'DELETE FROM location_types WHERE location_id = $1',
+      [id]
+    );
+
+    await client.query('COMMIT');
+
+    res.json({
+      message: 'Location deleted successfully'
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting location:', err);
+    res.status(500).json({
+      message: 'Error deleting location',
+      error: err.message
+    });
+  } finally {
+    client.release();
+  }
+};
+
 exports.handleRackScan = async (req, res) => {
   const { location_id } = req.body;
   const client = await pool.connect();

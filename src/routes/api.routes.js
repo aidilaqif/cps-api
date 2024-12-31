@@ -21,6 +21,7 @@ router.delete("/items/:id", itemController.deleteItem);
 router.get("/locations", locationController.getAllLocations);
 router.get("/locations/:id", locationController.getLocationById);
 router.post("/locations", locationController.createLocation);
+router.delete("/locations/:id", locationController.deleteLocation);
 
 // Movement logs routes
 router.post("/movement-logs", movementLogsController.createFlightSession);
