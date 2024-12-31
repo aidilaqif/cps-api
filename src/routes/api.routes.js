@@ -31,11 +31,8 @@ router.put("/movement-logs/:id/star", movementLogsController.updateLogStar);
 router.put("/movement-logs/:id/rename", movementLogsController.renameLog);
 router.delete("/movement-logs/:id", movementLogsController.deleteFlightSession);
 
-// Dashboard endpoints
-router.get("/drone-coverage", movementLogsController.getDroneCoverageStats);
-router.get("/stock-take-stats", movementLogsController.getStockTakeStats);
-router.get("/relocation-stats", movementLogsController.getRelocationStats);
-router.get("/movement-stats", movementLogsController.getMovementHistory);
-
+//Item Tracking routes
+router.post("/scan/rack", locationController.handleRackScan);
+router.post("/scan/item", locationController.handleItemScan);
 
 module.exports = router;
