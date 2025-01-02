@@ -1,4 +1,5 @@
 const pool = require("../config/db.config");
+const { randomUUID } = require("crypto");
 
 exports.getAllLocations = async (req, res) => {
   try {
@@ -42,6 +43,14 @@ exports.getLocationById = async (req, res) => {
 exports.createLocation = async (req, res) => {
   const { location_id, type_name } = req.body;
 
+  // Add validation for type_name
+  if (!["FG Pallet Location", "Paper Roll Location"].includes(type_name)) {
+    return res.status(400).json({
+      message:
+        "Invalid type_name. Must be either 'FG Pallet Location' or 'Paper Roll Location'",
+    });
+  }
+
   try {
     const result = await pool.query(
       "INSERT INTO location_types (location_id, type_name) VALUES ($1, $2) RETURNING *",
@@ -66,102 +75,64 @@ exports.deleteLocation = async (req, res) => {
   const client = await pool.connect();
 
   try {
-    await client.query('BEGIN');
+    await client.query("BEGIN");
 
     // Check if location exists
     const locationCheck = await client.query(
-      'SELECT * FROM location_types WHERE location_id = $1',
+      "SELECT * FROM location_types WHERE location_id = $1",
       [id]
     );
 
-    if(locationCheck.rows.length === 0){
+    if (locationCheck.rows.length === 0) {
       return res.status(404).json({
-        message: 'Location not found'
+        message: "Location not found",
       });
     }
 
     // Check if any items is in the location in any table
     const itemCheck = await Promise.all([
       // Check labels table
-      client.query('SELECT label_id FROM labels WHERE location_id = $1 LIMIT 1', [id]),
+      client.query(
+        "SELECT label_id FROM labels WHERE location_id = $1 LIMIT 1",
+        [id]
+      ),
       // Check paper rolls table
-      client.query('SELECT label_id FROM paper_rolls WHERE location_id = $1 LIMIT 1', [id]),
+      client.query(
+        "SELECT label_id FROM paper_rolls WHERE location_id = $1 LIMIT 1",
+        [id]
+      ),
       // Check fg pallets table
-      client.query('SELECT label_id FROM fg_pallets WHERE location_id = $1 LIMIT 1', [id])
+      client.query(
+        "SELECT label_id FROM fg_pallets WHERE location_id = $1 LIMIT 1",
+        [id]
+      ),
     ]);
 
     // If any query returns rows, items are still in the location
-    const hasAssignedItems = itemCheck.some(result => result.rows.length > 0);
+    const hasAssignedItems = itemCheck.some((result) => result.rows.length > 0);
 
-    if(hasAssignedItems){
+    if (hasAssignedItems) {
       return res.status(400).json({
-        message: 'Cannot delete locations: Items are still assigned to this location'
+        message:
+          "Cannot delete locations: Items are still assigned to this location",
       });
     }
 
     // If no items in the location
-    await client.query(
-      'DELETE FROM location_types WHERE location_id = $1',
-      [id]
-    );
+    await client.query("DELETE FROM location_types WHERE location_id = $1", [
+      id,
+    ]);
 
-    await client.query('COMMIT');
-
-    res.json({
-      message: 'Location deleted successfully'
-    });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error deleting location:', err);
-    res.status(500).json({
-      message: 'Error deleting location',
-      error: err.message
-    });
-  } finally {
-    client.release();
-  }
-};
-
-exports.handleRackScan = async (req, res) => {
-  const { location_id } = req.body;
-  const client = await pool.connect();
-
-  try {
-    // Verify location exists
-    const locationCheck = await client.query(
-      "SELECT * FROM location_types WHERE location_id = $1",
-      [location_id]
-    );
-
-    if (locationCheck.rows.length === 0) {
-      return res.status(404).json({
-        status: "error",
-        message: "Invalid rack location",
-      });
-    }
-
-    // Generate new scan session
-    const sessionId = crypto.randomUUID();
-
-    // Record rack scan
-    await client.query(
-      `INSERT INTO rack_item_assignments 
-          (location_id, scan_sequence, scan_session_id)
-          VALUES ($1, 1, $2)`,
-      [location_id, sessionId]
-    );
+    await client.query("COMMIT");
 
     res.json({
-      status: "success",
-      message: "Rack scan recorded",
-      session_id: sessionId,
-      location: locationCheck.rows[0],
+      message: "Location deleted successfully",
     });
   } catch (err) {
-    console.error("Rack scan error:", err);
+    await client.query("ROLLBACK");
+    console.error("Error deleting location:", err);
     res.status(500).json({
-      status: "error",
-      message: "Error processing rack scan",
+      message: "Error deleting location",
       error: err.message,
     });
   } finally {
@@ -169,17 +140,73 @@ exports.handleRackScan = async (req, res) => {
   }
 };
 
+//Handle rack of the location
+exports.handleRackScan = async (req, res) => {
+  const { location_id } = req.body;
+  const client = await pool.connect();
+
+  try {
+      console.log("Scanning rack location:", location_id); // Debug log
+
+      // Verify location exists
+      const locationCheck = await client.query(
+          "SELECT * FROM location_types WHERE location_id = $1",
+          [location_id.trim()] // Add trim() to handle whitespace
+      );
+
+      if (locationCheck.rows.length === 0) {
+          console.log("Location not found:", location_id); // Debug log
+          await client.release();
+          return res.status(404).json({
+              status: "error",
+              message: "Invalid rack location"
+          });
+      }
+
+      // Generate new scan session
+      const sessionId = randomUUID();
+
+      // Record rack scan
+      await client.query(
+          `INSERT INTO rack_item_assignments 
+          (location_id, scan_sequence, scan_session_id)
+          VALUES ($1, 1, $2)`,
+          [location_id.trim(), sessionId]
+      );
+
+      const response = {
+          status: "success",
+          message: "Rack scan recorded",
+          session_id: sessionId,
+          location: locationCheck.rows[0]
+      };
+
+      await client.release();
+      return res.json(response);
+
+  } catch (err) {
+      console.error("Rack scan error:", err);
+      await client.release();
+      return res.status(500).json({
+          status: "error",
+          message: "Error processing rack scan",
+          error: err.message
+      });
+  }
+};
+
 //Tracking item location
 exports.handleItemScan = async (req, res) => {
   const { label_id, session_id } = req.body;
   const client = await pool.connect();
-
   try {
     // Get the most recent rack scan for this session
-    const rackScan = await client.query(
-      `SELECT location_id FROM rack_item_assignments 
-           WHERE scan_session_id = $1 AND scan_sequence = 1 
-           ORDER BY scan_timestamp DESC LIMIT 1`,
+    const rackScan = await pool.query(
+      `SELECT lt.location_id, lt.type_name 
+           FROM rack_item_assignments ria 
+           JOIN location_types lt ON ria.location_id = lt.location_id
+           WHERE ria.scan_session_id = $1 AND ria.scan_sequence = 1
+           ORDER BY ria.scan_timestamp DESC LIMIT 1`,
       [session_id]
     );
 
@@ -190,21 +217,13 @@ exports.handleItemScan = async (req, res) => {
       });
     }
 
-    const scanned_location_id = rackScan.rows[0].location_id;
+    const scanned_location = rackScan.rows[0];
 
-    // Get item details and assigned location based on item type
-    const itemCheck = await client.query(
-      `SELECT 
-              l.label_type,
-              l.location_id as labels_location,
-              CASE 
-                  WHEN l.label_type = 'Roll' THEN 
-                      (SELECT location_id FROM paper_rolls WHERE label_id = $1)
-                  WHEN l.label_type = 'FG Pallet' THEN 
-                      (SELECT location_id FROM fg_pallets WHERE label_id = $1)
-              END as item_location
-          FROM labels l
-          WHERE l.label_id = $1`,
+    // Get item details
+    const itemCheck = await pool.query(
+      `SELECT l.label_type, l.location_id as current_location
+           FROM labels l
+           WHERE l.label_id = $1`,
       [label_id]
     );
 
@@ -215,84 +234,33 @@ exports.handleItemScan = async (req, res) => {
       });
     }
 
-    const { label_type, labels_location, item_location } = itemCheck.rows[0];
+    const { label_type, current_location } = itemCheck.rows[0];
 
-    // Get valid locations for this item type
-    const validLocations = await client.query(
-      `SELECT location_id 
-           FROM location_types 
-           WHERE $1 = ANY(allowed_item_types)`,
-      [label_type]
-    );
-
-    const validLocationIds = validLocations.rows.map((row) => row.location_id);
-
-    // Validate if scanned location is valid for this item type
-    const isValidLocationType = validLocationIds.includes(scanned_location_id);
-
-    // Check if item is in its assigned location
-    const isInCorrectLocation =
-      scanned_location_id === (item_location || labels_location);
-
-    // Record item scan with validation results
-    await client.query(
-      `INSERT INTO rack_item_assignments 
-          (location_id, label_id, scan_sequence, scan_session_id)
-          VALUES ($1, $2, 2, $3)`,
-      [scanned_location_id, label_id, session_id]
-    );
-
-    // If scan is valid, update locations in all relevant tables
-    if (isValidLocationType && isInCorrectLocation) {
-      await client.query("BEGIN");
-
-      // Update labels table
-      await client.query(
-        "UPDATE labels SET location_id = $1 WHERE label_id = $2",
-        [scanned_location_id, label_id]
-      );
-
-      // Update type-specific table
-      if (label_type === "Roll") {
-        await client.query(
-          "UPDATE paper_rolls SET location_id = $1 WHERE label_id = $2",
-          [scanned_location_id, label_id]
-        );
-      } else if (label_type === "FG Pallet") {
-        await client.query(
-          "UPDATE fg_pallets SET location_id = $1 WHERE label_id = $2",
-          [scanned_location_id, label_id]
-        );
-      }
-
-      await client.query("COMMIT");
-    }
+    // Validate location type matches item type
+    const isValidLocationType =
+      (label_type === "Roll" &&
+        scanned_location.type_name === "Paper Roll Location") ||
+      (label_type === "FG Pallet" &&
+        scanned_location.type_name === "FG Pallet Location");
 
     res.json({
       status: "success",
       validation: {
         correct_location_type: isValidLocationType,
-        in_assigned_location: isInCorrectLocation,
-        current_location: item_location || labels_location,
-        scanned_location: scanned_location_id,
-        valid_locations: validLocationIds,
+        in_assigned_location: current_location === scanned_location.location_id,
+        current_location: current_location,
+        scanned_location: scanned_location.location_id,
       },
-      message:
-        isValidLocationType && isInCorrectLocation
-          ? "Item is in correct rack and matches assigned location"
-          : !isValidLocationType
-          ? `WARNING: Item is in wrong rack type. Valid locations are: ${validLocationIds.join(
-              ", "
-            )}`
-          : "WARNING: Item is not in its assigned location",
+      message: isValidLocationType
+        ? "Item is in correct rack type"
+        : "WARNING: Item is in wrong rack type",
       details: {
         label_id,
-        rack_location: scanned_location_id,
+        rack_location: scanned_location.location_id,
         item_type: label_type,
       },
     });
   } catch (err) {
-    await client.query("ROLLBACK");
     console.error("Item scan error:", err);
     res.status(500).json({
       status: "error",
