@@ -60,7 +60,7 @@ exports.exportToCSV = async (req, res) => {
         if (row.location_id) {
           locationTypes.add({
             id: row.location_id,
-            type: row.label_type === 'Roll' ? 'Paper Roll Location' : 'FG Location'
+            type: row.label_type === 'Roll' ? 'Paper Roll Location' : 'FG Pallet Location'
           });
         }
       });
