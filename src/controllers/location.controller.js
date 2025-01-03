@@ -1,5 +1,9 @@
 const pool = require("../config/db.config");
 const { randomUUID } = require("crypto");
+const { v4: uuidv4 } = require("uuid");
+
+// Store active scan sessions in memory
+const activeScanSessions = new Map();
 
 exports.getAllLocations = async (req, res) => {
   try {
@@ -146,52 +150,49 @@ exports.handleRackScan = async (req, res) => {
   const client = await pool.connect();
 
   try {
-      console.log("Scanning rack location:", location_id); // Debug log
+    // Verify location exists
+    const locationCheck = await client.query(
+      "SELECT * FROM location_types WHERE location_id = $1",
+      [location_id]
+    );
 
-      // Verify location exists
-      const locationCheck = await client.query(
-          "SELECT * FROM location_types WHERE location_id = $1",
-          [location_id.trim()] // Add trim() to handle whitespace
-      );
-
-      if (locationCheck.rows.length === 0) {
-          console.log("Location not found:", location_id); // Debug log
-          await client.release();
-          return res.status(404).json({
-              status: "error",
-              message: "Invalid rack location"
-          });
-      }
-
-      // Generate new scan session
-      const sessionId = randomUUID();
-
-      // Record rack scan
-      await client.query(
-          `INSERT INTO rack_item_assignments 
-          (location_id, scan_sequence, scan_session_id)
-          VALUES ($1, 1, $2)`,
-          [location_id.trim(), sessionId]
-      );
-
-      const response = {
-          status: "success",
-          message: "Rack scan recorded",
-          session_id: sessionId,
-          location: locationCheck.rows[0]
-      };
-
-      await client.release();
-      return res.json(response);
-
-  } catch (err) {
-      console.error("Rack scan error:", err);
-      await client.release();
-      return res.status(500).json({
-          status: "error",
-          message: "Error processing rack scan",
-          error: err.message
+    if (locationCheck.rows.length === 0) {
+      return res.status(404).json({
+        status: "error",
+        message: "Invalid rack location",
       });
+    }
+
+    // Generate new scan session
+    const sessionId = uuidv4();
+
+    // Store session info in memory
+    activeScanSessions.set(sessionId, {
+      location_id,
+      timestamp: new Date(),
+      scan_sequence: 1,
+    });
+
+    // Set session expiry (e.g., 5 minutes)
+    setTimeout(() => {
+      activeScanSessions.delete(sessionId);
+    }, 5 * 60 * 1000);
+
+    res.json({
+      status: "success",
+      message: "Rack scan recorded",
+      session_id: sessionId,
+      location: locationCheck.rows[0],
+    });
+  } catch (err) {
+    console.error("Rack scan error:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Error processing rack scan",
+      error: err.message,
+    });
+  } finally {
+    client.release();
   }
 };
 
@@ -199,31 +200,40 @@ exports.handleRackScan = async (req, res) => {
 exports.handleItemScan = async (req, res) => {
   const { label_id, session_id } = req.body;
   const client = await pool.connect();
-  try {
-    // Get the most recent rack scan for this session
-    const rackScan = await pool.query(
-      `SELECT lt.location_id, lt.type_name 
-           FROM rack_item_assignments ria 
-           JOIN location_types lt ON ria.location_id = lt.location_id
-           WHERE ria.scan_session_id = $1 AND ria.scan_sequence = 1
-           ORDER BY ria.scan_timestamp DESC LIMIT 1`,
-      [session_id]
-    );
 
-    if (rackScan.rows.length === 0) {
+  try {
+    // Check if session exists and is valid
+    const sessionData = activeScanSessions.get(session_id);
+    if (!sessionData) {
       return res.status(400).json({
         status: "error",
-        message: "Please scan rack location first",
+        message:
+          "Invalid or expired scan session. Please scan rack location first",
       });
     }
 
-    const scanned_location = rackScan.rows[0];
+    const scanned_location = sessionData.location_id; // Get location from session
 
-    // Get item details
-    const itemCheck = await pool.query(
-      `SELECT l.label_type, l.location_id as current_location
-           FROM labels l
-           WHERE l.label_id = $1`,
+    // Get item details including location history
+    const itemCheck = await client.query(
+      `WITH current_assignment AS (
+              SELECT location_id, scan_timestamp
+              FROM rack_item_assignments
+              WHERE label_id = $1
+              ORDER BY scan_timestamp DESC
+              LIMIT 1
+          )
+          SELECT 
+              l.label_type,
+              l.location_id as registered_location,
+              ca.location_id as current_location,
+              CASE 
+                  WHEN ca.location_id IS NOT NULL THEN l.location_id
+                  ELSE NULL
+              END as past_location
+          FROM labels l
+          LEFT JOIN current_assignment ca ON true
+          WHERE l.label_id = $1`,
       [label_id]
     );
 
@@ -234,32 +244,52 @@ exports.handleItemScan = async (req, res) => {
       });
     }
 
-    const { label_type, current_location } = itemCheck.rows[0];
+    const { label_type, registered_location, current_location, past_location } =
+      itemCheck.rows[0];
 
-    // Validate location type matches item type
+    // Get location type info for validation
+    const locationTypeCheck = await client.query(
+      "SELECT type_name FROM location_types WHERE location_id = $1",
+      [scanned_location]
+    );
+
     const isValidLocationType =
       (label_type === "Roll" &&
-        scanned_location.type_name === "Paper Roll Location") ||
+        locationTypeCheck.rows[0].type_name === "Paper Roll Location") ||
       (label_type === "FG Pallet" &&
-        scanned_location.type_name === "FG Pallet Location");
+        locationTypeCheck.rows[0].type_name === "FG Pallet Location");
 
-    res.json({
+    // Create new rack-item assignment
+    await client.query(
+      `INSERT INTO rack_item_assignments
+           (location_id, label_id, scan_timestamp, scan_sequence, scan_session_id)
+           VALUES ($1, $2, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kuala_Lumpur', $3, $4)`,
+      [scanned_location, label_id, sessionData.scan_sequence, session_id]
+    );
+
+    // Format response object
+    const responseData = {
       status: "success",
       validation: {
         correct_location_type: isValidLocationType,
-        in_assigned_location: current_location === scanned_location.location_id,
-        current_location: current_location,
-        scanned_location: scanned_location.location_id,
+        in_assigned_location: registered_location === scanned_location,
       },
       message: isValidLocationType
         ? "Item is in correct rack type"
         : "WARNING: Item is in wrong rack type",
       details: {
         label_id,
-        rack_location: scanned_location.location_id,
-        item_type: label_type,
+        type: label_type,
+        work_order: req.body.work_order,
+        current_location: scanned_location, // Use scanned location as current
+        past_location: current_location || registered_location, // Use previous current location as past
+        correct_location: isValidLocationType,
+        exists: true,
+        timestamp: new Date().toISOString(),
       },
-    });
+    };
+
+    res.json(responseData);
   } catch (err) {
     console.error("Item scan error:", err);
     res.status(500).json({
