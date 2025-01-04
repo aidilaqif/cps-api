@@ -57,6 +57,7 @@ exports.checkItemExists = async (req, res) => {
     console.log("Checking item existence for:", id);
     const result = await pool.query(
       "SELECT l.*, " +
+      "l.location_id as registered_location," +
         "CASE " +
         "  WHEN l.label_type = 'Roll' THEN json_build_object('code', pr.code, 'name', pr.name, 'size_mm', pr.size_mm) " +
         "  WHEN l.label_type = 'FG Pallet' THEN json_build_object('plt_number', fp.plt_number, 'quantity', fp.quantity, 'work_order_id', fp.work_order_id, 'total_pieces', fp.total_pieces) " +
