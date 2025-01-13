@@ -92,37 +92,6 @@ exports.exportToCSV = async (req, res) => {
       ORDER BY start_time DESC
     `;
 
-    // Query for Scan Results
-    const scanResultsQuery = `
-      SELECT 
-        ria.scan_session_id as session_id,
-        ria.scan_timestamp,
-        ria.label_id,
-        CASE WHEN ria.scan_sequence = 2 THEN true ELSE false END as scan_success,
-        CASE 
-          WHEN ria.label_id IS NULL THEN 'QR Code Not Detected'
-          WHEN ria.scan_sequence != 2 THEN 'Invalid Scan Sequence'
-        END as scan_failure_reason,
-        l.label_type as item_type,
-        ria.location_id,
-        (
-          SELECT ml.battery_level
-          FROM movement_logs ml
-          WHERE ml.session_id = (
-            SELECT fs.session_id 
-            FROM flight_sessions fs 
-            WHERE fs.session_id::text = ria.scan_session_id::text
-            LIMIT 1
-          )
-          AND ml.timestamp <= ria.scan_timestamp
-          ORDER BY ml.timestamp DESC
-          LIMIT 1
-        ) as battery_level_at_scan
-      FROM rack_item_assignments ria
-      LEFT JOIN labels l ON ria.label_id = l.label_id
-      ORDER BY ria.scan_timestamp DESC
-    `;
-
     // Query for Item Status
     const itemsStatusQuery = `
         WITH scan_stats AS (
@@ -149,10 +118,9 @@ exports.exportToCSV = async (req, res) => {
       `;
 
     // Execute all queries in parallel
-    const [itemsResult, flightSessionsResult, scanResultsResult, itemsStatusResult] = await Promise.all([
+    const [itemsResult, flightSessionsResult, itemsStatusResult] = await Promise.all([
       pool.query(itemsQuery),
       pool.query(flightSessionsQuery),
-      pool.query(scanResultsQuery),
       pool.query(itemsStatusQuery)
     ]);
 
@@ -177,16 +145,6 @@ exports.exportToCSV = async (req, res) => {
         successful_scans: row.successful_scans,
         failed_scans: row.failed_scans,
         flight_duration: parseFloat(row.flight_duration).toFixed(2)
-      })),
-      scan_results: scanResultsResult.rows.map(row => ({
-        session_id: row.session_id,
-        scan_timestamp: moment(row.scan_timestamp).format(),
-        label_id: row.label_id,
-        scan_success: row.scan_success,
-        scan_failure_reason: row.scan_failure_reason,
-        item_type: row.item_type,
-        location_id: row.location_id,
-        battery_level_at_scan: row.battery_level_at_scan
       })),
       items_status: itemsStatusResult.rows.map(row => ({
         label_id: row.label_id,
