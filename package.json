@@ -4,8 +4,7 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js",
-    "vercel-build": "deploy app"
+    "dev": "nodemon src/server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -20,8 +19,6 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "nodemon": "^3.1.7",
-    "@types/node": "^17.0.42",
-    "@vercel/node": "^2.9.6"
+    "nodemon": "^3.1.7"
   }
 }
