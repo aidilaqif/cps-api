@@ -4,6 +4,7 @@ const itemController = require("../controllers/item.controller");
 const locationController = require("../controllers/location.controller");
 const exportController = require("../controllers/export.controller");
 const movementLogsController = require("../controllers/movement.logs.controller");
+const analysisController = require("../controllers/analysis.controller");
 
 // Export routes
 router.get("/export/csv", exportController.exportToCSV);
@@ -35,5 +36,10 @@ router.delete("/movement-logs/:id", movementLogsController.deleteFlightSession);
 //Item Tracking routes
 router.post("/scan/rack", locationController.handleRackScan);
 router.post("/scan/item", locationController.handleItemScan);
+
+// Analysis Routes
+router.get('/analysis/battery', analysisController.getBatteryEfficiencyAnalysis);
+router.get('/analysis/movements', analysisController.getMovementPatternsAnalysis);
+router.get('/analysis/performance', analysisController.getDronePerformanceAnalysis);
 
 module.exports = router;
