@@ -1,8 +1,67 @@
 const pool = require('../config/db.config');
 const openaiService = require('../services/openai.service');
+const moment = require('moment-timezone');
+const { hasSignificantChange } = require('../utils/analysisUtils');
+
+const CACHE_DURATION = 24;
+
+const getCachedAnalysis = async (analysisType) => {
+    const query = `
+        SELECT metrics, analysis, updated_at
+        FROM analysis_cache
+        WHERE analysis_type = $1
+    `;
+    const result = await pool.query(query, [analysisType]);
+
+    if (result.rows.length > 0) {
+        const cachedData = result.rows[0];
+        const cacheAge = moment().diff(moment(cachedData.updated_at), 'hours');
+      
+        if (cacheAge < CACHE_DURATION) {
+            return {
+                metrics: cachedData.metrics,
+                analysis: cachedData.analysis
+            };
+        }
+    }
+    return null;
+};
+  
+const updateCache = async (analysisType, metrics, analysis) => {
+    try {
+
+        // Ensure metrics is properly formatted as JSON
+        const metricsJson = typeof metrics === 'string' ? metrics : JSON.stringify(metrics);
+
+
+        const query = `
+        INSERT INTO analysis_cache (analysis_type, metrics, analysis)
+        VALUES ($1, $2::jsonb, $3)
+        ON CONFLICT (analysis_type) 
+        DO UPDATE SET 
+            metrics = $2::jsonb,
+            analysis = $3,
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING *
+        `;
+
+        const result = await pool.query(query, [analysisType, metricsJson, analysis]);
+        return result.rows[0];
+    } catch (err) {
+        console.error('Error in updateCache:', err);
+        console.error('Failed metrics:', metrics);
+        throw err;
+    }
+};
 
 exports.getBatteryEfficiencyAnalysis = async (req, res) => {
     try {
+        // Check cache first
+        const cachedData = await getCachedAnalysis('battery');
+        if (cachedData) {
+            return res.json(cachedData);
+        }
+        // If no cache, perform analysis
         const query = `
             WITH BatteryMetrics AS (
                 SELECT 
@@ -28,11 +87,15 @@ exports.getBatteryEfficiencyAnalysis = async (req, res) => {
             FROM BatteryMetrics`;
 
         const result = await pool.query(query);
-        const analysis = await openaiService.analyzeBatteryEfficiency(result.rows[0]);
+        const metrics = result.rows[0];
+        const analysis = await openaiService.analyzeBatteryEfficiency(metrics);
+
+        // Update cache
+        await updateCache('battery', metrics, analysis);
 
         res.json({
-            metrics: result.rows[0],
-            analysis: analysis
+            metrics,
+            analysis
         });
     } catch (error) {
         console.error('Analysis error:', error);
@@ -44,34 +107,51 @@ exports.getBatteryEfficiencyAnalysis = async (req, res) => {
 
 exports.getMovementPatternsAnalysis = async (req, res) => {
     try {
+        // Check cache first
+        const cachedData = await getCachedAnalysis('movemnent');
+        if (cachedData) {
+            return res.json(cachedData);
+        }
+        // If no cache, perform analysis
         const query = `
-            WITH MovementStats AS (
-                SELECT 
-                    ml.action,
-                    COUNT(*) as usage_count,
-                    COUNT(DISTINCT ml.session_id) as session_count,
-                    ROUND(AVG(ml.battery_level)::numeric, 2) as avg_battery_level,
-                    ROUND(AVG(ml.distance)::numeric, 2) as avg_distance
-                FROM movement_logs ml
-                GROUP BY ml.action
-            )
+        WITH MovementStats AS (
             SELECT 
-                action,
-                usage_count,
-                session_count,
-                avg_battery_level,
-                avg_distance,
-                ROUND((usage_count::float / (SELECT SUM(usage_count) FROM MovementStats) * 100)::numeric, 2) as usage_percentage
-            FROM MovementStats
-            ORDER BY usage_count DESC`;
+            ml.action,
+            COUNT(*) as usage_count,
+            COUNT(DISTINCT ml.session_id) as session_count,
+            ROUND(AVG(ml.battery_level)::numeric, 2) as avg_battery_level,
+            ROUND(AVG(ml.distance)::numeric, 2) as avg_distance
+            FROM movement_logs ml
+            GROUP BY ml.action
+        )
+        SELECT
+            action,
+            usage_count,
+            session_count,
+            avg_battery_level,
+            avg_distance,
+            ROUND((usage_count::float / (SELECT SUM(usage_count) FROM MovementStats) * 100)::numeric, 2) as usage_percentage
+        FROM MovementStats
+        ORDER BY usage_count DESC`;
 
         const result = await pool.query(query);
-        const analysis = await openaiService.analyzeMovementPatterns(result.rows);
+        const metrics = result.rows.map(row => ({
+            ...row,
+            usage_count: Number(row.usage_count),
+            session_count: Number(row.session_count),
+            avg_battery_level: Number(row.avg_battery_level),
+            avg_distance: Number(row.avg_distance),
+            usage_percentage: Number(row.usage_percentage)
+          }));
 
-        res.json({
-            patterns: result.rows,
+        const analysis = await openaiService.analyzeMovementPatterns(metrics);
+
+        const cacheData = {
+            patterns: metrics,
             analysis: analysis
-        });
+        }
+        await updateCache('movement', cacheData, analysis);
+        res.json(cacheData);
     } catch (error) {
         console.error('Analysis error:', error);
         res.status(500).json({
@@ -82,6 +162,12 @@ exports.getMovementPatternsAnalysis = async (req, res) => {
 
 exports.getDronePerformanceAnalysis = async (req, res) => {
     try {
+        const cachedData = await getCachedAnalysis('performance');
+            if (cachedData) {
+            return res.json(cachedData);
+            }
+
+        // If no cache, perform analysis
         const query = `
             WITH PerformanceMetrics AS (
                 SELECT 
@@ -111,11 +197,14 @@ exports.getDronePerformanceAnalysis = async (req, res) => {
             FROM PerformanceMetrics`;
 
         const result = await pool.query(query);
-        const analysis = await openaiService.analyzeDronePerformance(result.rows[0]);
-
+        const metrics = result.rows[0];
+        const analysis = await openaiService.analyzeDronePerformance(metrics);
+    
+        await updateCache('performance', metrics, analysis);
+    
         res.json({
-            metrics: result.rows[0],
-            analysis: analysis
+            metrics,
+            analysis
         });
     } catch (error) {
         console.error('Analysis error:', error);
