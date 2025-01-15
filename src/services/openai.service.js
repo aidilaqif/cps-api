@@ -4,6 +4,13 @@ const openaiConfig = require('../config/openai.config');
 const openaiService = {
     async analyzeBatteryEfficiency(data) {
         try {
+            // Calculate key insights for the prompt
+            const metrics = data.metrics;
+            const timeSeriesData = data.timeSeriesData;
+            
+            const consumptionDiff = (metrics.avg_actual_consumption - metrics.avg_recommended_consumption).toFixed(2);
+            const efficiencyDiff = (metrics.avg_actual_efficiency - metrics.avg_recommended_efficiency).toFixed(2);
+            
             const response = await axios.post(
                 openaiConfig.analysisEndpoint,
                 {
@@ -11,15 +18,28 @@ const openaiService = {
                     messages: [
                         {
                             role: "system",
-                            content: "You are a battery efficiency analyst for drone operations. Analyze the data and provide insights focused on battery usage optimization."
+                            content: "You are a battery efficiency analyst for drone operations. Focus on comparing actual vs recommended metrics and providing actionable insights."
                         },
                         {
                             role: "user",
-                            content: `Analyze this drone battery data: ${JSON.stringify(data)} 
-                                    Focus on:
-                                    1. Battery consumption vs. items scanned ratio
-                                    2. Optimal flight duration predictions
-                                    3. Most efficient movement patterns based on battery usage`
+                            content: `Analyze the following drone battery metrics:
+                            
+                            Average Metrics:
+                            - Actual Consumption: ${metrics.avg_actual_consumption} units
+                            - Recommended Consumption: ${metrics.avg_recommended_consumption} units
+                            - Actual Efficiency: ${metrics.avg_actual_efficiency} items/unit
+                            - Recommended Efficiency: ${metrics.avg_recommended_efficiency} items/unit
+                            - Items Scanned: ${metrics.avg_items_scanned}
+                            - Flight Duration: ${metrics.avg_duration} minutes
+                            
+                            Key Differences:
+                            - Consumption Difference: ${consumptionDiff} units
+                            - Efficiency Difference: ${efficiencyDiff} items/unit
+                            
+                            Focus on:
+                            1. Comparison between actual and recommended consumption patterns
+                            2. Efficiency gap analysis and improvement opportunities
+                            3. Specific recommendations to align actual performance with recommended levels`
                         }
                     ],
                     max_tokens: openaiConfig.maxTokens,
@@ -32,6 +52,7 @@ const openaiService = {
                     }
                 }
             );
+
             return response.data.choices[0].message.content;
         } catch (error) {
             console.error('OpenAI API Error:', error);
