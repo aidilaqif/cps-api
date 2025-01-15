@@ -4,7 +4,7 @@
 CPS Dragonfly API is a Node.js-based RESTful service that powers inventory management and drone analytics for industrial automation. The service integrates with OpenAI for intelligent analysis and provides comprehensive endpoints for inventory tracking, location management, and performance analytics.
 
 ## Related Repositories
-- 📱 [Mobile Scanner App Repository]([https://github.com/aidilaqif/cps_dragonfly_mobile_app)
+- 📱 [Mobile Scanner App Repository](https://github.com/aidilaqif/cps_dragonfly_mobile_app)
 - 🖥️ [Web Dashboard Repository](https://github.com/dzker/CPS-X-4.0_Frontend)
 
 ## Features 🌟
