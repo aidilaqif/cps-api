@@ -74,6 +74,7 @@ exports.createLocation = async (req, res) => {
 };
 
 // Delete Location
+// Modified location delete handler
 exports.deleteLocation = async (req, res) => {
   const { id } = req.params;
   const client = await pool.connect();
@@ -93,36 +94,21 @@ exports.deleteLocation = async (req, res) => {
       });
     }
 
-    // Check if any items is in the location in any table
-    const itemCheck = await Promise.all([
-      // Check labels table
-      client.query(
-        "SELECT label_id FROM labels WHERE location_id = $1 LIMIT 1",
-        [id]
-      ),
-      // Check paper rolls table
-      client.query(
-        "SELECT label_id FROM paper_rolls WHERE location_id = $1 LIMIT 1",
-        [id]
-      ),
-      // Check fg pallets table
-      client.query(
-        "SELECT label_id FROM fg_pallets WHERE location_id = $1 LIMIT 1",
-        [id]
-      ),
-    ]);
+    // Only check labels table since it contains all item assignments
+    const itemCheck = await client.query(
+      "SELECT label_id FROM labels WHERE location_id = $1 LIMIT 1",
+      [id]
+    );
 
-    // If any query returns rows, items are still in the location
-    const hasAssignedItems = itemCheck.some((result) => result.rows.length > 0);
-
-    if (hasAssignedItems) {
+    // If any items are still assigned to this location
+    if (itemCheck.rows.length > 0) {
       return res.status(400).json({
         message:
-          "Cannot delete locations: Items are still assigned to this location",
+          "Cannot delete location: Items are still assigned to this location",
       });
     }
 
-    // If no items in the location
+    // If no items in the location, proceed with deletion
     await client.query("DELETE FROM location_types WHERE location_id = $1", [
       id,
     ]);
