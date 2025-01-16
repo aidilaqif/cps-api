@@ -93,24 +93,11 @@ exports.deleteLocation = async (req, res) => {
       });
     }
 
-    // Check if any items is in the location in any table
-    const itemCheck = await Promise.all([
-      // Check labels table
-      client.query(
-        "SELECT label_id FROM labels WHERE location_id = $1 LIMIT 1",
-        [id]
-      ),
-      // Check paper rolls table
-      client.query(
-        "SELECT label_id FROM paper_rolls WHERE location_id = $1 LIMIT 1",
-        [id]
-      ),
-      // Check fg pallets table
-      client.query(
-        "SELECT label_id FROM fg_pallets WHERE location_id = $1 LIMIT 1",
-        [id]
-      ),
-    ]);
+    // Only check labels table since it contains all item assignments
+    const itemCheck = await client.query(
+      "SELECT label_id FROM labels WHERE location_id = $1 LIMIT 1",
+      [id]
+    );
 
     // If any query returns rows, items are still in the location
     const hasAssignedItems = itemCheck.some((result) => result.rows.length > 0);

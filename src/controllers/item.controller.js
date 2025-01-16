@@ -57,7 +57,7 @@ exports.checkItemExists = async (req, res) => {
     console.log("Checking item existence for:", id);
     const result = await pool.query(
       "SELECT l.*, " +
-      "l.location_id as registered_location," +
+        "l.location_id as registered_location," +
         "CASE " +
         "  WHEN l.label_type = 'Roll' THEN json_build_object('code', pr.code, 'name', pr.name, 'size_mm', pr.size_mm) " +
         "  WHEN l.label_type = 'FG Pallet' THEN json_build_object('plt_number', fp.plt_number, 'quantity', fp.quantity, 'work_order_id', fp.work_order_id, 'total_pieces', fp.total_pieces) " +
@@ -110,20 +110,19 @@ exports.createNewItem = async (req, res) => {
     let detailsResult;
     if (label_type === "FG Pallet") {
       detailsResult = await client.query(
-        "INSERT INTO fg_pallets (label_id, plt_number, quantity, work_order_id, total_pieces, location_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
+        "INSERT INTO fg_pallets (label_id, plt_number, quantity, work_order_id, total_pieces) VALUES ($1, $2, $3, $4, $5) RETURNING *",
         [
           label_id,
           details.plt_number,
           details.quantity,
           details.work_order_id || null,
           details.total_pieces,
-          location_id,
         ]
       );
     } else if (label_type === "Roll") {
       detailsResult = await client.query(
-        "INSERT INTO paper_rolls (label_id, code, name, size_mm, location_id) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-        [label_id, details.code, details.name, details.size_mm, location_id]
+        "INSERT INTO paper_rolls (label_id, code, name, size_mm ) VALUES ($1, $2, $3, $4) RETURNING *",
+        [label_id, details.code, details.name, details.size_mm]
       );
     }
 
