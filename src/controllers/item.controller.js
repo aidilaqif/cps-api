@@ -198,10 +198,60 @@ exports.updateStatus = async (req, res) => {
 exports.updateLocation = async (req, res) => {
   const { id } = req.params;
   const { location_id } = req.body;
+  const client = await pool.connect();
 
   try {
-    const result = await pool.query(
-      `UPDATE labels 
+    await client.query("BEGIN");
+
+    // First get the item type
+    const itemResult = await client.query(
+      "SELECT label_type FROM labels WHERE label_id = $1",
+      [id]
+    );
+
+    if (itemResult.rows.length === 0) {
+      return res.status(404).json({
+        message: `Item with ID ${id} not found`,
+      });
+    }
+
+    const itemType = itemResult.rows[0].label_type;
+
+    // Get the location type
+    const locationResult = await client.query(
+      "SELECT type_name FROM location_types WHERE location_id = $1",
+      [location_id]
+    );
+
+    if (locationResult.rows.length === 0) {
+      return res.status(404).json({
+        message: `Location ${location_id} not found`,
+      });
+    }
+
+    const locationType = locationResult.rows[0].type_name;
+
+    // Check compatibility
+    const isCompatible =
+      (itemType === "Roll" && locationType === "Paper Roll Location") ||
+      (itemType === "FG Pallet" && locationType === "FG Pallet Location");
+
+    if (!isCompatible) {
+      return res.status(400).json({
+        message: `Cannot move ${itemType} to ${locationType}. Incompatible location type.`,
+        error: "INCOMPATIBLE_LOCATION",
+        details: {
+          itemType,
+          locationType,
+          expectedType:
+            itemType === "Roll" ? "Paper Roll Location" : "FG Pallet Location",
+        },
+      });
+    }
+
+    // If compatible, proceed with update
+    const result = await client.query(
+      `UPDATE labels
        SET location_id = $1,
            last_scan_time = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kuala_Lumpur'
        WHERE label_id = $2
@@ -209,11 +259,7 @@ exports.updateLocation = async (req, res) => {
       [location_id, id]
     );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        message: `Item with ID ${id} not found`,
-      });
-    }
+    await client.query("COMMIT");
 
     // Format the timestamp before sending response
     const formattedResult = {
@@ -228,11 +274,14 @@ exports.updateLocation = async (req, res) => {
       data: formattedResult,
     });
   } catch (err) {
+    await client.query("ROLLBACK");
     console.error("Error updating location:", err);
     res.status(500).json({
       message: "Error updating item location",
       error: err.message,
     });
+  } finally {
+    client.release();
   }
 };
 
