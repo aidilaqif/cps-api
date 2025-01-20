@@ -56,92 +56,86 @@ const updateCache = async (analysisType, metrics, analysis) => {
 
 exports.getBatteryEfficiencyAnalysis = async (req, res) => {
     try {
-        const query = `
-            WITH TimeSeriesData AS (
-                SELECT 
-                    fs.session_id,
-                    fs.start_time,
-                    fs.end_time,
-                    fs.battery_start,
-                    fs.battery_end,
-                    COUNT(ria.label_id) as items_scanned,
-                    EXTRACT(EPOCH FROM (fs.end_time - fs.start_time))/60 as duration_minutes,
-                    (fs.battery_start - fs.battery_end) as actual_consumption,
-                    -- Calculate optimal battery consumption based on standard rate
-                    LEAST(
-                        (EXTRACT(EPOCH FROM (fs.end_time - fs.start_time))/60) * 0.5, -- Standard consumption rate per minute
-                        20 -- Maximum recommended consumption per session
-                    ) as recommended_consumption,
-                    -- Calculate efficiencies
-                    CASE 
-                        WHEN fs.battery_start - fs.battery_end > 0 
-                        THEN (COUNT(ria.label_id)::float / (fs.battery_start - fs.battery_end))
-                        ELSE 0 
-                    END as actual_efficiency,
-                    -- Standard efficiency rate (items per battery unit)
-                    2.5 as recommended_efficiency
-                FROM flight_sessions fs
-                LEFT JOIN rack_item_assignments ria 
-                    ON ria.scan_session_id::text = fs.session_id::text
-                WHERE fs.battery_start > fs.battery_end
-                GROUP BY 
-                    fs.session_id, 
-                    fs.start_time, 
-                    fs.end_time, 
-                    fs.battery_start, 
-                    fs.battery_end
-                ORDER BY fs.start_time
-            ),
-            BatteryMetrics AS (
-                SELECT
-                    AVG(actual_consumption) as avg_actual_consumption,
-                    AVG(recommended_consumption) as avg_recommended_consumption,
-                    AVG(actual_efficiency) as avg_actual_efficiency,
-                    AVG(recommended_efficiency) as avg_recommended_efficiency,
-                    AVG(items_scanned) as avg_items_scanned,
-                    AVG(duration_minutes) as avg_duration
-                FROM TimeSeriesData
+      const query = `
+        WITH FlightMetrics AS (
+          SELECT 
+            session_id,
+            start_time,
+            end_time,
+            battery_start,
+            battery_end,
+            EXTRACT(EPOCH FROM (end_time - start_time)) as duration_seconds,
+            (battery_start - battery_end) as actual_consumption,
+            -- Calculate consumption rates
+            ROUND(CAST((battery_start - battery_end) / EXTRACT(EPOCH FROM (end_time - start_time)) AS numeric), 2) as actual_rate_per_second,
+            -- Recommended rate based on specs (100% / 780 seconds)
+            ROUND(CAST(100 / 780.0 AS numeric), 2) as recommended_rate_per_second
+          FROM flight_sessions
+          WHERE battery_start > battery_end
+          AND EXTRACT(EPOCH FROM (end_time - start_time)) > 0
+        ),
+        BatteryMetrics AS (
+          SELECT
+            ROUND(AVG(actual_rate_per_second)::numeric, 2) as avg_actual_rate,
+            ROUND(AVG(recommended_rate_per_second)::numeric, 2) as avg_recommended_rate,
+            ROUND(AVG(duration_seconds)::numeric, 2) as avg_duration,
+            ROUND(AVG(actual_consumption)::numeric, 2) as avg_actual_consumption
+          FROM FlightMetrics
+        ),
+        TimePoints AS (
+          SELECT generate_series(0, 780, 60) as time_point
+        ),
+        TimeSeriesData AS (
+          SELECT 
+            t.time_point,
+            ROUND(CAST(100 - (100 / 780.0 * t.time_point) AS numeric), 2) as recommended_battery,
+            CASE 
+              WHEN t.time_point <= 300 
+              THEN ROUND(CAST(100 - (100 / 300.0 * t.time_point) AS numeric), 2)
+              ELSE 0
+            END as actual_battery
+          FROM TimePoints t
+        )
+        SELECT json_build_object(
+          'metrics', (
+            SELECT row_to_json(BatteryMetrics.*) 
+            FROM BatteryMetrics
+          ),
+          'timeSeriesData', (
+            SELECT json_agg(
+              json_build_object(
+                'timePoint', time_point,
+                'recommendedBattery', recommended_battery,
+                'actualBattery', actual_battery
+              )
+              ORDER BY time_point
             )
-            SELECT 
-                json_build_object(
-                    'metrics', (SELECT row_to_json(BatteryMetrics.*) FROM BatteryMetrics),
-                    'timeSeriesData', (
-                        SELECT json_agg(
-                            json_build_object(
-                                'timestamp', start_time,
-                                'actualConsumption', actual_consumption,
-                                'recommendedConsumption', recommended_consumption,
-                                'actualEfficiency', actual_efficiency,
-                                'recommendedEfficiency', recommended_efficiency
-                            )
-                            ORDER BY start_time
-                        )
-                        FROM TimeSeriesData
-                    )
-                ) as analysis_data`;
-
-        const result = await pool.query(query);
-        const analysisData = result.rows[0].analysis_data;
-
-        // Get AI analysis of the patterns
-        const aiAnalysis = await openaiService.analyzeBatteryEfficiency({
-            metrics: analysisData.metrics,
-            timeSeriesData: analysisData.timeSeriesData
-        });
-
-        res.json({
-            metrics: analysisData.metrics,
-            timeSeriesData: analysisData.timeSeriesData,
-            analysis: aiAnalysis
-        });
-
+            FROM TimeSeriesData
+          )
+        ) as analysis_data`;
+  
+      const result = await pool.query(query);
+      const analysisData = result.rows[0].analysis_data;
+  
+      // Get AI analysis of the patterns
+      const aiAnalysis = await openaiService.analyzeBatteryEfficiency({
+        metrics: analysisData.metrics,
+        timeSeriesData: analysisData.timeSeriesData
+      });
+  
+      res.json({
+        metrics: analysisData.metrics,
+        timeSeriesData: analysisData.timeSeriesData,
+        analysis: aiAnalysis
+      });
+  
     } catch (error) {
-        console.error('Analysis error:', error);
-        res.status(500).json({
-            error: 'Failed to analyze battery efficiency'
-        });
+      console.error('Analysis error:', error);
+      res.status(500).json({
+        error: 'Failed to analyze battery efficiency'
+      });
     }
-};
+  };
 
 exports.getMovementPatternsAnalysis = async (req, res) => {
     try {
