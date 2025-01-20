@@ -4,61 +4,66 @@ const openaiConfig = require('../config/openai.config');
 const openaiService = {
     async analyzeBatteryEfficiency(data) {
         try {
-            // Calculate key insights for the prompt
-            const metrics = data.metrics;
-            const timeSeriesData = data.timeSeriesData;
-            
-            const consumptionDiff = (metrics.avg_actual_consumption - metrics.avg_recommended_consumption).toFixed(2);
-            const efficiencyDiff = (metrics.avg_actual_efficiency - metrics.avg_recommended_efficiency).toFixed(2);
-            
-            const response = await axios.post(
-                openaiConfig.analysisEndpoint,
+          const metrics = data.metrics;
+          const timeSeriesData = data.timeSeriesData;
+          
+          // Calculate key insights for the prompt
+          const actualDuration = metrics.avg_duration; // seconds from your test data
+          const recommendedDuration = 780; // seconds from specifications
+          const actualRate = metrics.avg_actual_rate;
+          const recommendedRate = metrics.avg_recommended_rate;
+          const efficiencyDiff = ((actualRate - recommendedRate) / recommendedRate * 100).toFixed(2);
+      
+          const response = await axios.post(
+            openaiConfig.analysisEndpoint,
+            {
+              model: openaiConfig.model,
+              messages: [
                 {
-                    model: openaiConfig.model,
-                    messages: [
-                        {
-                            role: "system",
-                            content: "You are a battery efficiency analyst for drone operations. Focus on comparing actual vs recommended metrics and providing actionable insights."
-                        },
-                        {
-                            role: "user",
-                            content: `Analyze the following drone battery metrics:
-                            
-                            Average Metrics:
-                            - Actual Consumption: ${metrics.avg_actual_consumption} units
-                            - Recommended Consumption: ${metrics.avg_recommended_consumption} units
-                            - Actual Efficiency: ${metrics.avg_actual_efficiency} items/unit
-                            - Recommended Efficiency: ${metrics.avg_recommended_efficiency} items/unit
-                            - Items Scanned: ${metrics.avg_items_scanned}
-                            - Flight Duration: ${metrics.avg_duration} minutes
-                            
-                            Key Differences:
-                            - Consumption Difference: ${consumptionDiff} units
-                            - Efficiency Difference: ${efficiencyDiff} items/unit
-                            
-                            Focus on:
-                            1. Comparison between actual and recommended consumption patterns
-                            2. Efficiency gap analysis and improvement opportunities
-                            3. Specific recommendations to align actual performance with recommended levels`
-                        }
-                    ],
-                    max_tokens: openaiConfig.maxTokens,
-                    temperature: openaiConfig.temperature
+                  role: "system",
+                  content: "You are a battery efficiency analyst for drone operations. Focus on comparing actual vs recommended metrics and providing actionable insights based on DJI Tello specifications."
                 },
                 {
-                    headers: {
-                        'Authorization': `Bearer ${openaiConfig.apiKey}`,
-                        'Content-Type': 'application/json'
-                    }
+                  role: "user",
+                  content: `Analyze the following drone battery metrics:
+      
+      Specifications vs Actual Performance:
+      - Recommended Flight Duration: ${recommendedDuration} seconds (13 minutes)
+      - Actual Flight Duration: ${actualDuration} seconds (${(actualDuration/60).toFixed(2)} minutes)
+      - Recommended Consumption Rate: ${recommendedRate}% per second
+      - Actual Consumption Rate: ${actualRate}% per second
+      - Efficiency Difference: ${efficiencyDiff}%
+      
+      Performance Gap:
+      - Duration Gap: ${recommendedDuration - actualDuration} seconds
+      - Rate Difference: ${(actualRate - recommendedRate).toFixed(2)}% per second
+      
+      Focus your analysis on:
+      1. Comparison between actual and recommended consumption patterns
+      2. Potential causes for the performance gap
+      3. Impact on operational efficiency
+      4. Specific recommendations to align actual performance with specifications
+      
+      Please provide a structured analysis with clear sections for findings, implications, and recommendations.`
                 }
-            );
-
-            return response.data.choices[0].message.content;
+              ],
+              max_tokens: openaiConfig.maxTokens,
+              temperature: openaiConfig.temperature
+            },
+            {
+              headers: {
+                'Authorization': `Bearer ${openaiConfig.apiKey}`,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+      
+          return response.data.choices[0].message.content;
         } catch (error) {
-            console.error('OpenAI API Error:', error);
-            throw new Error('Failed to analyze battery efficiency');
+          console.error('OpenAI API Error:', error);
+          throw new Error('Failed to analyze battery efficiency');
         }
-    },
+      },
 
     async analyzeMovementPatterns(data) {
         try {
